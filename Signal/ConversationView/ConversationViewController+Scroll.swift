@@ -88,7 +88,11 @@ extension ConversationViewController {
             break
         case .scrollTo(let interactionId, let onScreenPercentage, let alignment):
             if let indexPath = self.indexPath(forInteractionUniqueId: interactionId) {
-                viewState.highlightedMessageId = interactionId
+                // Size transitions use this action to keep the reader's place,
+                // so only highlight for jumps the user asked for.
+                if viewState.scrollActionForSizeTransition == nil {
+                    viewState.highlightedMessageId = interactionId
+                }
 
                 // TODO: Set position and animated.
                 scrollToInteraction(
