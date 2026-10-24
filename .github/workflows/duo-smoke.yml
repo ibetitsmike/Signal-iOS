@@ -1,0 +1,100 @@
+name: Duo smoke
+
+# Fork-only workflow: builds a Debug Signal for the iPhone Duo simulator with
+# local ad-hoc signing, launches it on the outer display, and uploads
+# screenshots, the console, logs, and any crash reports.
+on:
+  push:
+    branches:
+      - 'mike/iphone-duo-smoke'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Launch on iPhone Duo simulator
+    timeout-minutes: 240
+    runs-on: xcode-27
+    steps:
+      - name: Select Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          if [ -d /Applications/Xcode_27.1.app ]; then
+            echo DEVELOPER_DIR=/Applications/Xcode_27.1.app >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Download Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Download iOS platform
+        run: xcodebuild -downloadPlatform iOS
+
+      - name: Fetch RingRTC
+        run: make fetch-ringrtc
+
+      - name: Create iPhone Duo simulator
+        run: |
+          DT=com.apple.CoreSimulator.SimDeviceType.iPhone-Duo
+          RT=$(xcrun simctl list runtimes -j | jq -r '.runtimes | map(select(.name | startswith("iOS"))) | sort_by(.version) | last | .identifier')
+          UDID=$(xcrun simctl create "Duo Smoke" "$DT" "$RT")
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "Duo Smoke"
+
+      - name: Build
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          set -o pipefail
+          NSUnbufferedIO=YES xcodebuild \
+            -workspace Signal.xcworkspace \
+            -scheme Signal \
+            -configuration Debug \
+            -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -disableAutomaticPackageResolution \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM= \
+            PROVISIONING_PROFILE_SPECIFIER= \
+            build \
+            2>&1 \
+          | tee "$RUNNER_TEMP/logs/build.log" \
+          | xcbeautify --renderer github-actions --disable-logging
+
+      - name: Launch on the outer display
+        run: |
+          set -x
+          APP="$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/Signal.app"
+          BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
+          codesign -d --entitlements - "$APP" 2>&1 | head -40 || true
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b || true
+          sleep 20
+          mkdir -p shots
+          shot() { perl -e 'alarm shift; exec @ARGV' 60 xcrun simctl io "$UDID" screenshot --display="$1" "shots/$2.png" 2>&1 | tail -1 || true; }
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch --console-pty "$UDID" "$BUNDLE" > shots/console.txt 2>&1 &
+          sleep 30
+          shot 1 launch-30s
+          sleep 30
+          shot 1 launch-60s
+          xcrun simctl spawn "$UDID" launchctl list | grep -i signal || true
+          xcrun simctl spawn "$UDID" log show --last 3m --style compact --predicate 'process == "Signal"' > shots/log.txt 2>&1 || true
+          tail -80 shots/log.txt || true
+          head -100 shots/console.txt || true
+          ls -la ~/Library/Logs/DiagnosticReports/ | grep -i signal || true
+          cp ~/Library/Logs/DiagnosticReports/Signal* shots/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: smoke
+          path: |
+            shots
+            ${{ runner.temp }}/logs
