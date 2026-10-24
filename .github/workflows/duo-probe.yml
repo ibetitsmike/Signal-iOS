@@ -1,0 +1,66 @@
+name: Duo simulator probe
+
+# Fork-only probe of the iPhone Duo simulator on the xcode-27 runner image.
+on:
+  push:
+    branches:
+      - 'mike/iphone-duo-probe'
+
+jobs:
+  probe:
+    timeout-minutes: 45
+    runs-on: xcode-27
+    steps:
+      - name: Select Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          if [ -d /Applications/Xcode_27.1.app ]; then
+            echo DEVELOPER_DIR=/Applications/Xcode_27.1.app >> "$GITHUB_ENV"
+          fi
+      - name: Versions
+        run: |
+          xcodebuild -version
+          sw_vers
+          xcodebuild -showsdks
+      - name: Simulator inventory
+        run: |
+          xcrun simctl list runtimes
+          xcrun simctl list devicetypes
+          xcrun simctl list devices available
+      - name: simctl help
+        run: |
+          xcrun simctl help 2>&1 || true
+          for c in io ui hinge posture fold display; do echo "=== simctl help $c"; xcrun simctl help $c 2>&1 | head -60 || true; done
+      - name: Duo device type profile
+        run: |
+          find / -name "*Duo*.simdevicetype" -maxdepth 12 2>/dev/null | head -5 || true
+          P=$(find / -name "*Duo*.simdevicetype" -maxdepth 12 2>/dev/null | head -1)
+          if [ -n "$P" ]; then
+            ls -R "$P" | head -50
+            for f in "$P"/Contents/Resources/profile.plist "$P"/Contents/Info.plist "$P"/Contents/Resources/capabilities.plist; do
+              echo "=== $f"; [ -f "$f" ] && plutil -convert xml1 -o - "$f" | head -300
+            done
+          fi
+      - name: Boot Duo and screenshot
+        run: |
+          set -x
+          DT=$(xcrun simctl list devicetypes -j | jq -r '.devicetypes[] | select(.name | test("Duo")) | .identifier' | head -1)
+          RT=$(xcrun simctl list runtimes -j | jq -r '.runtimes | map(select(.name | startswith("iOS"))) | sort_by(.version) | last | .identifier')
+          echo "DT=$DT RT=$RT"
+          [ -n "$DT" ] || exit 0
+          UDID=$(xcrun simctl create "Duo Probe" "$DT" "$RT")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          sleep 20
+          mkdir -p shots
+          xcrun simctl io "$UDID" enumerate 2>&1 | head -80 || true
+          xcrun simctl io "$UDID" screenshot shots/home-default.png || true
+          xcrun simctl io "$UDID" screenshot --display=internal shots/home-internal.png 2>&1 || true
+          xcrun simctl io "$UDID" screenshot --display=external shots/home-external.png 2>&1 || true
+          xcrun simctl spawn "$UDID" defaults read com.apple.springboard 2>&1 | head -5 || true
+          ls -la shots
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: probe-shots
+          path: shots
