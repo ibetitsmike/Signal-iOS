@@ -35,17 +35,6 @@ jobs:
           cp .github/duo-probe/Info.plist Probe.app/Info.plist
           codesign --force --sign - Probe.app
           ls -la Probe.app
-      - name: Look for fold controls
-        run: |
-          SIMAPP=$(xcode-select -p)/Applications/Simulator.app
-          echo "=== Simulator.app strings"
-          strings "$SIMAPP/Contents/MacOS/Simulator" | grep -i -E "fold|hinge|posture|unfold|closeDevice|openDevice" | sort -u | head -60 || true
-          for fw in /Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator "$(xcode-select -p)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"; do
-            echo "=== $fw"
-            [ -f "$fw" ] && strings "$fw" | grep -i -E "fold|hinge|posture" | sort -u | head -60 || true
-          done
-          echo "=== Simulator.app resources"
-          grep -r -l -i -E "hinge|posture|fold" "$SIMAPP/Contents/Resources" 2>/dev/null | head -20 || true
       - name: Run probe app on Duo
         run: |
           set -x
@@ -63,12 +52,42 @@ jobs:
           shot 1 app-outer
           shot 3 app-inner
           echo "=== try Simulator.app GUI"
-          open -a "$(xcode-select -p)/Applications/Simulator.app" --args -CurrentDeviceUDID "$UDID" || true
-          sleep 15
-          perl -e 'alarm shift; exec @ARGV' 30 osascript -e 'tell application "System Events" to tell process "Simulator" to get name of every menu of menu bar 1' 2>&1 || true
-          perl -e 'alarm shift; exec @ARGV' 30 osascript -e 'tell application "System Events" to tell process "Simulator" to get name of every menu item of menu "Device" of menu bar 1' 2>&1 || true
-          perl -e 'alarm shift; exec @ARGV' 30 osascript -e 'tell application "System Events" to tell process "Simulator" to get name of every menu item of menu "Features" of menu bar 1' 2>&1 || true
+          SIMAPP=$(mdfind "kMDItemCFBundleIdentifier == 'com.apple.iphonesimulator'" | head -1)
+          [ -n "$SIMAPP" ] || SIMAPP=$(find /Applications /Library/Developer -maxdepth 8 -name "Simulator.app" -type d 2>/dev/null | head -1)
+          echo "SIMAPP=$SIMAPP"
+          open -a "$SIMAPP" --args -CurrentDeviceUDID "$UDID" || true
+          sleep 20
           screencapture -x shots/mac-desktop.png 2>&1 || true
+          osa() { perl -e 'alarm shift; exec @ARGV' 60 osascript .github/duo-probe/menus.applescript "$@" 2>&1 || true; }
+          osa > shots/menus.txt
+          cat shots/menus.txt | head -150
+          for item in "Open" "Unfold" "Open Device" "Unfold Device" "Book" "Flat" "Open Fully"; do
+            if grep -q "> $item\$" shots/menus.txt; then
+              echo "=== clicking $item"
+              osa "$item" | grep CLICKED || true
+              sleep 15
+              break
+            fi
+          done
+          shot 1 gui-outer
+          shot 3 gui-inner
+          screencapture -x shots/mac-desktop2.png 2>&1 || true
+          if grep -q "> Rotate Left$" shots/menus.txt; then
+            echo "=== rotate left"
+            osa "Rotate Left" | grep CLICKED || true
+            sleep 10
+            shot 1 rot-outer
+            shot 3 rot-inner
+          fi
+          for item in "Fold" "Close Device" "Fold Device" "Closed"; do
+            if grep -q "> $item\$" shots/menus.txt; then
+              echo "=== clicking $item"
+              osa "$item" | grep CLICKED || true
+              sleep 15
+              break
+            fi
+          done
+          shot 1 gui-closed-outer
           echo "=== screen power: inner on, outer off"
           perl -e 'alarm shift; exec @ARGV' 60 xcrun simctl io "$UDID" screenConfig --display=3 power on 2>&1 || true
           perl -e 'alarm shift; exec @ARGV' 60 xcrun simctl io "$UDID" screenConfig --display=1 power off 2>&1 || true
