@@ -1,0 +1,109 @@
+name: Duo validation
+
+# Fork-only workflow: compiles the iPhone Duo branch with Xcode 27.1 on
+# GitHub-hosted runners and runs the repo's precommit formatter on the
+# files the branch changes.
+on:
+  push:
+    branches:
+      - 'mike/iphone-duo-ci'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  precommit:
+    name: precommit
+    timeout-minutes: 30
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app
+      swiftformat-ref: c8e50ff2cfc2eab46246c072a9ae25ab656c6ec3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: 'Signal-iOS'
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: brew install clang-format
+
+      - name: Cache SwiftFormat
+        id: cache-swiftformat
+        uses: actions/cache@v5
+        with:
+          path: SwiftFormat/.build
+          key: SwiftFormat-${{ env.swiftformat-ref }}-${{ env.DEVELOPER_DIR }}
+
+      - uses: actions/checkout@v6
+        if: steps.cache-swiftformat.outputs.cache-hit != 'true'
+        with:
+          path: 'SwiftFormat'
+          ref: ${{ env.swiftformat-ref }}
+          repository: 'nicklockwood/SwiftFormat'
+
+      - name: Build SwiftFormat
+        if: steps.cache-swiftformat.outputs.cache-hit != 'true'
+        working-directory: SwiftFormat
+        run: swift build -c release --product swiftformat
+
+      - name: Run precommit on files changed since main
+        working-directory: Signal-iOS
+        run: |
+          export PATH="$GITHUB_WORKSPACE/SwiftFormat/.build/release:$PATH"
+          Scripts/precommit.py --ref origin/main
+          git diff --name-only | sed -E 's|(.*)|::error file=\1::Incorrectly formatted (Scripts/precommit.py)|'
+          git diff
+          git diff --exit-code
+
+  build:
+    name: Build for testing (Xcode 27.1)
+    timeout-minutes: 240
+    runs-on: xcode-27
+    steps:
+      - name: Select Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          if [ -d /Applications/Xcode_27.1.app ]; then
+            echo DEVELOPER_DIR=/Applications/Xcode_27.1.app >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Download Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Download iOS platform
+        run: xcodebuild -downloadPlatform iOS
+
+      - name: Fetch RingRTC
+        run: make fetch-ringrtc
+
+      - name: Build
+        run: |
+          mkdir -p "$HOME/Library/Logs/Signal-CI"
+          set -o pipefail
+          NSUnbufferedIO=YES xcodebuild \
+            -workspace Signal.xcworkspace \
+            -scheme Signal \
+            -destination 'generic/platform=iOS Simulator' \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing \
+            2>&1 \
+          | tee "$HOME/Library/Logs/Signal-CI/build.log" \
+          | xcbeautify --renderer github-actions --disable-logging
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: build-log
+          path: ~/Library/Logs/Signal-CI
