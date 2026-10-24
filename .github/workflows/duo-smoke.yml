@@ -82,8 +82,14 @@ jobs:
           xcrun simctl launch --console-pty "$UDID" "$BUNDLE" > shots/console.txt 2>&1 &
           sleep 30
           shot 1 launch-30s
-          sleep 30
-          shot 1 launch-60s
+          # A cold Debug launch runs every database migration before the
+          # registration splash appears.
+          for i in $(seq 1 60); do
+            grep -q "Pushing controller for registrationSplash" shots/console.txt && break
+            sleep 5
+          done
+          sleep 10
+          shot 1 registration-splash
           xcrun simctl spawn "$UDID" launchctl list | grep -i signal || true
           xcrun simctl spawn "$UDID" log show --last 3m --style compact --predicate 'process == "Signal"' > shots/log.txt 2>&1 || true
           tail -80 shots/log.txt || true
