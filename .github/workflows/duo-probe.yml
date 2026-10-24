@@ -11,6 +11,9 @@ jobs:
     timeout-minutes: 45
     runs-on: xcode-27
     steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
       - name: Select Xcode
         run: |
           ls -d /Applications/Xcode*.app
