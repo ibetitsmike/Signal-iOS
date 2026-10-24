@@ -44,20 +44,33 @@ jobs:
       - name: Boot Duo and screenshot
         run: |
           set -x
-          DT=$(xcrun simctl list devicetypes -j | jq -r '.devicetypes[] | select(.name | test("Duo")) | .identifier' | head -1)
+          DT=com.apple.CoreSimulator.SimDeviceType.iPhone-Duo
           RT=$(xcrun simctl list runtimes -j | jq -r '.runtimes | map(select(.name | startswith("iOS"))) | sort_by(.version) | last | .identifier')
-          echo "DT=$DT RT=$RT"
-          [ -n "$DT" ] || exit 0
           UDID=$(xcrun simctl create "Duo Probe" "$DT" "$RT")
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
-          sleep 20
+          sleep 30
           mkdir -p shots
-          xcrun simctl io "$UDID" enumerate 2>&1 | head -80 || true
-          xcrun simctl io "$UDID" screenshot shots/home-default.png || true
-          xcrun simctl io "$UDID" screenshot --display=internal shots/home-internal.png 2>&1 || true
-          xcrun simctl io "$UDID" screenshot --display=external shots/home-external.png 2>&1 || true
-          xcrun simctl spawn "$UDID" defaults read com.apple.springboard 2>&1 | head -5 || true
+          shot() { xcrun simctl io "$UDID" screenshot --display="$1" "shots/$2.png" 2>&1 | tail -2 || true; }
+          shot 1 boot-outer
+          shot 3 boot-inner
+          echo "=== power off inner (fold?)"
+          xcrun simctl io "$UDID" screenConfig --display=3 power off 2>&1 || true
+          sleep 10
+          xcrun simctl io "$UDID" enumerate 2>&1 | grep -E "Power state|Default (width|height)" || true
+          shot 1 folded-outer
+          shot 3 folded-inner
+          echo "=== power on inner, power off outer (unfold?)"
+          xcrun simctl io "$UDID" screenConfig --display=3 power on 2>&1 || true
+          xcrun simctl io "$UDID" screenConfig --display=1 power off 2>&1 || true
+          sleep 10
+          xcrun simctl io "$UDID" enumerate 2>&1 | grep -E "Power state|Default (width|height)" || true
+          shot 1 unfolded-outer
+          shot 3 unfolded-inner
+          echo "=== geometry probe"
+          xcrun simctl io "$UDID" screenConfig --display=3 2>&1 | head -20 || true
+          xcrun simctl spawn "$UDID" log show --last 2m --predicate 'eventMessage CONTAINS[c] "hinge" OR eventMessage CONTAINS[c] "fold" OR eventMessage CONTAINS[c] "posture"' 2>&1 | tail -40 || true
           ls -la shots
       - uses: actions/upload-artifact@v6
         if: always()
