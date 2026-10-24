@@ -763,11 +763,26 @@ class StoryContextViewController: OWSViewController, DatabaseChangeDelegate,
         }
     }
 
-    private lazy var iPhoneConstraints = [
-        mediaViewContainer.autoPinEdge(toSuperviewSafeArea: .top),
-        mediaViewContainer.autoPinEdge(toSuperviewSafeArea: .leading),
-        mediaViewContainer.autoPinEdge(toSuperviewSafeArea: .trailing),
-    ]
+    private lazy var iPhoneConstraints: [NSLayoutConstraint] = {
+        var constraints = [
+            mediaViewContainer.autoPinEdge(toSuperviewSafeArea: .top),
+            mediaViewContainer.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            mediaViewContainer.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor),
+        ]
+
+        // Fill the width unless the card and the replies button would not fit
+        // above the bottom safe area (e.g. the iPhone Duo outer display).
+        NSLayoutConstraint.autoSetPriority(.defaultHigh) {
+            constraints.append(mediaViewContainer.autoPinEdge(toSuperviewSafeArea: .leading))
+        }
+        let repliesBottomConstraint = repliesAndViewsButton.bottomAnchor.constraint(
+            lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor,
+        )
+        repliesBottomConstraint.priority = .required - 1
+        constraints.append(repliesBottomConstraint)
+
+        return constraints
+    }()
 
     private lazy var iPadConstraints: [NSLayoutConstraint] = {
         var constraints = mediaViewContainer.autoCenterInSuperview()
@@ -811,22 +826,50 @@ class StoryContextViewController: OWSViewController, DatabaseChangeDelegate,
         ),
     ]
 
+    private enum MediaLayout {
+        case phone
+        case centeredPortrait
+        case centeredLandscape
+    }
+
+    private var appliedMediaLayout: MediaLayout?
+
     private func applyConstraints() {
+        // The iPhone Duo inner display is regular/regular but not an iPad, and
+        // can lie flat, so use size classes and bounds rather than the idiom
+        // and device orientation.
+        let isRegularSize = traitCollection.horizontalSizeClass == .regular && traitCollection.verticalSizeClass == .regular
+        let mediaLayout: MediaLayout
+        if UIDevice.current.isIPad || isRegularSize {
+            mediaLayout = view.bounds.width > view.bounds.height ? .centeredLandscape : .centeredPortrait
+        } else {
+            mediaLayout = .phone
+        }
+        // Called on every layout pass, and changing constraints invalidates layout.
+        guard mediaLayout != appliedMediaLayout else { return }
+        appliedMediaLayout = mediaLayout
+
         NSLayoutConstraint.deactivate(iPhoneConstraints)
         NSLayoutConstraint.deactivate(iPadConstraints)
         NSLayoutConstraint.deactivate(iPadPortraitConstraints)
         NSLayoutConstraint.deactivate(iPadLandscapeConstraints)
 
-        if UIDevice.current.isIPad {
-            NSLayoutConstraint.activate(iPadConstraints)
-            if UIDevice.current.orientation.isLandscape {
-                NSLayoutConstraint.activate(iPadLandscapeConstraints)
-            } else {
-                NSLayoutConstraint.activate(iPadPortraitConstraints)
-            }
-        } else {
+        switch mediaLayout {
+        case .phone:
             NSLayoutConstraint.activate(iPhoneConstraints)
+        case .centeredPortrait:
+            NSLayoutConstraint.activate(iPadConstraints)
+            NSLayoutConstraint.activate(iPadPortraitConstraints)
+        case .centeredLandscape:
+            NSLayoutConstraint.activate(iPadConstraints)
+            NSLayoutConstraint.activate(iPadLandscapeConstraints)
         }
+    }
+
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        // Opening or closing an iPhone Duo moves the app between displays.
+        applyConstraints()
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
