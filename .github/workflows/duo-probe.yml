@@ -22,56 +22,64 @@ jobs:
           xcodebuild -version
           sw_vers
           xcodebuild -showsdks
-      - name: Simulator inventory
+      - name: Build probe app
         run: |
-          xcrun simctl list runtimes
-          xcrun simctl list devicetypes
-          xcrun simctl list devices available
-      - name: simctl help
+          set -x
+          mkdir -p Probe.app
+          xcrun -sdk iphonesimulator swiftc -parse-as-library -swift-version 5 \
+            -target arm64-apple-ios17.0-simulator \
+            -module-name Probe .github/duo-probe/Probe.swift -o Probe.app/Probe
+          cp .github/duo-probe/Info.plist Probe.app/Info.plist
+          codesign --force --sign - Probe.app
+          ls -la Probe.app
+      - name: Look for fold controls
         run: |
-          xcrun simctl help 2>&1 || true
-          for c in io ui hinge posture fold display; do echo "=== simctl help $c"; xcrun simctl help $c 2>&1 | head -60 || true; done
-      - name: Duo device type profile
-        run: |
-          find / -name "*Duo*.simdevicetype" -maxdepth 12 2>/dev/null | head -5 || true
-          P=$(find / -name "*Duo*.simdevicetype" -maxdepth 12 2>/dev/null | head -1)
-          if [ -n "$P" ]; then
-            ls -R "$P" | head -50
-            for f in "$P"/Contents/Resources/profile.plist "$P"/Contents/Info.plist "$P"/Contents/Resources/capabilities.plist; do
-              echo "=== $f"; [ -f "$f" ] && plutil -convert xml1 -o - "$f" | head -300
-            done
-          fi
-      - name: Boot Duo and screenshot
+          SIMAPP=$(xcode-select -p)/Applications/Simulator.app
+          echo "=== Simulator.app strings"
+          strings "$SIMAPP/Contents/MacOS/Simulator" | grep -i -E "fold|hinge|posture|unfold|closeDevice|openDevice" | sort -u | head -60 || true
+          for fw in /Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator "$(xcode-select -p)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"; do
+            echo "=== $fw"
+            [ -f "$fw" ] && strings "$fw" | grep -i -E "fold|hinge|posture" | sort -u | head -60 || true
+          done
+          echo "=== Simulator.app resources"
+          grep -r -l -i -E "hinge|posture|fold" "$SIMAPP/Contents/Resources" 2>/dev/null | head -20 || true
+      - name: Run probe app on Duo
         run: |
           set -x
           DT=com.apple.CoreSimulator.SimDeviceType.iPhone-Duo
           RT=$(xcrun simctl list runtimes -j | jq -r '.runtimes | map(select(.name | startswith("iOS"))) | sort_by(.version) | last | .identifier')
           UDID=$(xcrun simctl create "Duo Probe" "$DT" "$RT")
-          echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl boot "$UDID"
-          xcrun simctl bootstatus "$UDID" -b
-          sleep 30
+          xcrun simctl bootstatus "$UDID" -b || true
+          sleep 20
           mkdir -p shots
-          shot() { xcrun simctl io "$UDID" screenshot --display="$1" "shots/$2.png" 2>&1 | tail -2 || true; }
-          shot 1 boot-outer
-          shot 3 boot-inner
-          echo "=== power off inner (fold?)"
-          xcrun simctl io "$UDID" screenConfig --display=3 power off 2>&1 || true
+          shot() { perl -e 'alarm shift; exec @ARGV' 60 xcrun simctl io "$UDID" screenshot --display="$1" "shots/$2.png" 2>&1 | tail -1 || true; }
+          xcrun simctl install "$UDID" Probe.app
+          SIMCTL_CHILD_PROBE_KVC=1 xcrun simctl launch --console-pty --terminate-running-process "$UDID" org.example.duoprobe > shots/probe-console.txt 2>&1 &
+          sleep 15
+          shot 1 app-outer
+          shot 3 app-inner
+          echo "=== try Simulator.app GUI"
+          open -a "$(xcode-select -p)/Applications/Simulator.app" --args -CurrentDeviceUDID "$UDID" || true
+          sleep 15
+          perl -e 'alarm shift; exec @ARGV' 30 osascript -e 'tell application "System Events" to tell process "Simulator" to get name of every menu of menu bar 1' 2>&1 || true
+          perl -e 'alarm shift; exec @ARGV' 30 osascript -e 'tell application "System Events" to tell process "Simulator" to get name of every menu item of menu "Device" of menu bar 1' 2>&1 || true
+          perl -e 'alarm shift; exec @ARGV' 30 osascript -e 'tell application "System Events" to tell process "Simulator" to get name of every menu item of menu "Features" of menu bar 1' 2>&1 || true
+          screencapture -x shots/mac-desktop.png 2>&1 || true
+          echo "=== screen power: inner on, outer off"
+          perl -e 'alarm shift; exec @ARGV' 60 xcrun simctl io "$UDID" screenConfig --display=3 power on 2>&1 || true
+          perl -e 'alarm shift; exec @ARGV' 60 xcrun simctl io "$UDID" screenConfig --display=1 power off 2>&1 || true
+          sleep 15
+          shot 3 power-inner
+          echo "=== screen power: outer on"
+          perl -e 'alarm shift; exec @ARGV' 60 xcrun simctl io "$UDID" screenConfig --display=1 power on 2>&1 || true
           sleep 10
-          xcrun simctl io "$UDID" enumerate 2>&1 | grep -E "Power state|Default (width|height)" || true
-          shot 1 folded-outer
-          shot 3 folded-inner
-          echo "=== power on inner, power off outer (unfold?)"
-          xcrun simctl io "$UDID" screenConfig --display=3 power on 2>&1 || true
-          xcrun simctl io "$UDID" screenConfig --display=1 power off 2>&1 || true
-          sleep 10
-          xcrun simctl io "$UDID" enumerate 2>&1 | grep -E "Power state|Default (width|height)" || true
-          shot 1 unfolded-outer
-          shot 3 unfolded-inner
-          echo "=== geometry probe"
-          xcrun simctl io "$UDID" screenConfig --display=3 2>&1 | head -20 || true
-          xcrun simctl spawn "$UDID" log show --last 2m --predicate 'eventMessage CONTAINS[c] "hinge" OR eventMessage CONTAINS[c] "fold" OR eventMessage CONTAINS[c] "posture"' 2>&1 | tail -40 || true
-          ls -la shots
+          shot 1 power-outer
+          shot 3 power-inner2
+          sleep 5
+          echo "=== probe console"
+          cat shots/probe-console.txt | head -200
+          xcrun simctl spawn "$UDID" log show --last 3m --style compact --predicate 'process == "Probe"' 2>&1 | tail -60 || true
       - uses: actions/upload-artifact@v6
         if: always()
         with:
