@@ -883,11 +883,12 @@ class PhotoCaptureViewController: OWSViewController, OWSNavigationChildControlle
     private func constraintsForLegacyPhoneLayout() -> [NSLayoutConstraint] {
         var constraints = [NSLayoutConstraint]()
 
-        // Full-screen content view.
+        // Full-screen content view, kept clear of side insets such as the
+        // trailing strip on the iPhone Duo outer display.
         constraints += [
             contentView.topAnchor.constraint(equalTo: view.topAnchor),
-            contentView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            contentView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            contentView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             contentView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ]
 
@@ -908,7 +909,7 @@ class PhotoCaptureViewController: OWSViewController, OWSNavigationChildControlle
             constraints += [
                 // CAMERA | TEXT control is pinned to the bottom of the screen with a fixed margin.
                 composerTypeSelectionControl.bottomAnchor.constraint(
-                    equalTo: contentView.bottomAnchor,
+                    equalTo: view.safeAreaLayoutGuide.bottomAnchor,
                     constant: -verticalSpacing,
                 ),
 
@@ -927,7 +928,7 @@ class PhotoCaptureViewController: OWSViewController, OWSNavigationChildControlle
             constraints += [
                 // Proceed button is pinned to the bottom of the screen with a fixed margin.
                 cameraModeProceedButton.bottomAnchor.constraint(
-                    equalTo: contentView.bottomAnchor,
+                    equalTo: view.safeAreaLayoutGuide.bottomAnchor,
                     constant: -verticalSpacing,
                 ),
 
