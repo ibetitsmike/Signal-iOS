@@ -45,7 +45,7 @@ final class Probe: NSObject, WKScriptMessageHandler {
     }
 }
 
-final class WebVC: UIViewController {
+final class WebVC: UIViewController, WKNavigationDelegate {
     var web: WKWebView!
     let urls = [
         "probe://app/iframe.html?id=probe-duo--workspace&viewMode=story",
@@ -60,13 +60,16 @@ final class WebVC: UIViewController {
         let cfg = WKWebViewConfiguration()
         cfg.setURLSchemeHandler(scheme, forURLScheme: "probe")
         cfg.userContentController.add(probe, name: "probe")
+        let meta = "var m=document.querySelector('meta[name=viewport]'); if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);} m.content='width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content, maximum-scale=1';"
+        cfg.userContentController.addUserScript(WKUserScript(source: meta, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         web = WKWebView(frame: view.bounds, configuration: cfg)
         web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         if #available(iOS 16.4, *) { web.isInspectable = true }
+        web.navigationDelegate = self
         view.addSubview(web)
         out("root=\(scheme.root.path) exists=\(FileManager.default.fileExists(atPath: scheme.root.path + "/iframe.html"))")
         loadNext()
-        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.loadNext() }
         }
     }
@@ -76,6 +79,30 @@ final class WebVC: UIViewController {
         out("load \(u) bounds=\(view.bounds.size) safe=\(view.safeAreaInsets) adjInset=\(web.scrollView.adjustedContentInset)")
         web.load(URLRequest(url: URL(string: u)!))
     }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let resize = (idx % 4 == 3) || (idx % 4 == 0) // second pass of each story simulates a fold
+        out("didFinish idx=\(idx) resize=\(resize)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard let self else { return }
+            if resize {
+                let b = self.view.bounds
+                self.web.autoresizingMask = []
+                self.web.frame = CGRect(x: 0, y: 0, width: 951, height: 1300)
+                out("resized big")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    self.web.frame = b
+                    self.web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                    out("resized back")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        self.web.evaluateJavaScript("window.__probeGo=1") { _, _ in }
+                    }
+                }
+            } else {
+                self.web.evaluateJavaScript("window.__probeGo=1") { _, _ in }
+            }
+        }
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         out("viewDidAppear bounds=\(view.bounds.size) safe=\(view.safeAreaInsets)")

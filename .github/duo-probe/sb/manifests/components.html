@@ -582,7 +582,7 @@
 <main>
   <div class="wrap">
     <div class="note info" style="margin-bottom: 16px;">
-            <strong>Tip:</strong> You are using <code>react-docgen</code> (the default). Generation took <strong>11.6s</strong>. For higher quality prop types, consider switching to <code>react-docgen-typescript</code> in your <code>main.ts</code>:
+            <strong>Tip:</strong> You are using <code>react-docgen</code> (the default). Generation took <strong>9.3s</strong>. For higher quality prop types, consider switching to <code>react-docgen-typescript</code> in your <code>main.ts</code>:
             <pre><code>typescript: {
   reactDocgen: 'react-docgen-typescript',
 }</code></pre>
@@ -14142,6 +14142,8 @@ export const Workspace: AppStory = {
       btn: rectOf(btn),
       header: rectOf(btn.closest(&quot;.mobile-sticky-header&quot;)),
     });
+    await waitFor(() =&gt; (window as unknown as { __probeGo?: number }).__probeGo, 60000).catch(() =&gt; 0);
+    await log(&quot;ws-go&quot;, { btn: rectOf(btn) });
     btn.click();
     await sleep(50);
     await log(&quot;ws-open-50ms&quot;);
@@ -14188,6 +14190,8 @@ export const Creation: AppStory = {
       )
     );
     await log(&quot;cr-before-open&quot;, { sel: rectOf(sel) });
+    await waitFor(() =&gt; (window as unknown as { __probeGo?: number }).__probeGo, 60000).catch(() =&gt; 0);
+    await log(&quot;cr-go&quot;, { sel: rectOf(sel) });
     sel.click();
     await sleep(50);
     await log(&quot;cr-open-50ms&quot;);
@@ -66314,6 +66318,8 @@ export const Workspace: AppStory = {
       btn: rectOf(btn),
       header: rectOf(btn.closest(&quot;.mobile-sticky-header&quot;)),
     });
+    await waitFor(() =&gt; (window as unknown as { __probeGo?: number }).__probeGo, 60000).catch(() =&gt; 0);
+    await log(&quot;ws-go&quot;, { btn: rectOf(btn) });
     btn.click();
     await sleep(50);
     await log(&quot;ws-open-50ms&quot;);
@@ -66360,6 +66366,8 @@ export const Creation: AppStory = {
       )
     );
     await log(&quot;cr-before-open&quot;, { sel: rectOf(sel) });
+    await waitFor(() =&gt; (window as unknown as { __probeGo?: number }).__probeGo, 60000).catch(() =&gt; 0);
+    await log(&quot;cr-go&quot;, { sel: rectOf(sel) });
     sel.click();
     await sleep(50);
     await log(&quot;cr-open-50ms&quot;);
