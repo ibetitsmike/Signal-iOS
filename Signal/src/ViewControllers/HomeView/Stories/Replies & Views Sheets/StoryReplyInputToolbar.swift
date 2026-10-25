@@ -213,10 +213,10 @@ class StoryReplyInputToolbar: UIView, BodyRangesTextViewDelegate {
     private enum LayoutMetrics {
         static let initialTextBoxHeight: CGFloat = 40
         static let minTextViewHeight: CGFloat = 35
-        static func maxTextViewHeight(isLandscape: Bool) -> CGFloat {
+        static var maxTextViewHeight: CGFloat {
             // About ~4 lines in portrait and ~3 lines in landscape.
             // Otherwise we risk obscuring too much of the content.
-            isLandscape ? 100 : 160
+            UIDevice.current.orientation.isPortrait ? 160 : 100
         }
     }
 
@@ -517,11 +517,10 @@ class StoryReplyInputToolbar: UIView, BodyRangesTextViewDelegate {
         }
 
         let contentSize = textView.sizeThatFits(CGSize(width: textView.frame.width, height: .greatestFiniteMagnitude))
-        let isLandscape = window?.windowScene?.interfaceOrientation.isLandscape == true
         let newHeight = CGFloat.clamp(
             contentSize.height,
             min: LayoutMetrics.minTextViewHeight,
-            max: LayoutMetrics.maxTextViewHeight(isLandscape: isLandscape),
+            max: LayoutMetrics.maxTextViewHeight,
         )
         guard textViewHeightConstraint.constant != newHeight else { return }
 

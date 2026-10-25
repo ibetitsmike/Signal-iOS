@@ -229,11 +229,7 @@ class IndividualCallViewController: OWSViewController, IndividualCallObserver {
         super.viewWillTransition(to: size, with: coordinator)
         coordinator.animate(alongsideTransition: { [weak self] _ in
             self?.updateLocalVideoLayout()
-        }, completion: { [weak self] _ in
-            // Opening or closing iPhone Duo moves the call between a display
-            // that keeps it in portrait and one that doesn't.
-            self?.callService.sendInitialPhoneOrientationNotification()
-        })
+        }, completion: nil)
     }
 
     override func viewDidDisappear(_ animated: Bool) {
