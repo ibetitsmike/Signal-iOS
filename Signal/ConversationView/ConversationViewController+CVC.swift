@@ -834,13 +834,6 @@ extension ConversationViewController: CVLoadCoordinatorDelegate {
     public func updateConversationStyle() -> Bool {
         AssertIsOnMainThread()
 
-        // When a split view expands, this view controller is moved to a new
-        // navigation controller and can get layout callbacks in between. The
-        // style is rebuilt once it has been added to the new one.
-        if conversationStyle.type == .`default`, navigationController == nil, !viewState.isInPreviewPlatter {
-            return false
-        }
-
         let newConversationStyle = buildConversationStyle()
 
         guard newConversationStyle != conversationStyle else {
