@@ -54,7 +54,7 @@ class LinkDeviceViewController: OWSViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
-        if !view.ignoresSupportedInterfaceOrientations {
+        if !UIDevice.current.isIPad {
             UIDevice.current.ows_setOrientation(.portrait)
         }
 

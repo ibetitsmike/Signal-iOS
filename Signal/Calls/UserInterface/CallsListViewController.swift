@@ -136,8 +136,7 @@ class CallsListViewController: OWSViewController, HomeTabViewController, CallSer
         updateTableViewPaddingIfNeeded()
 
         view.addSubview(emptyStateMessageView)
-        emptyStateMessageView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor).isActive = true
-        emptyStateMessageView.autoVCenterInSuperview()
+        emptyStateMessageView.autoCenterInSuperview()
 
         view.addSubview(noSearchResultsView)
         noSearchResultsView.autoPinWidthToSuperviewMargins()
