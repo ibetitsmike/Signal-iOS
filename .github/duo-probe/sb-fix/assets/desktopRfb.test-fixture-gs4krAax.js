@@ -1,0 +1,1 @@
+import{w as i}from"./iframe-DwmVy7SQ.js";const s=(t,{signal:e}={})=>{async function*o(){yield{type:"ready",viewerId:t.viewerId??"desktop-fixture"},await new Promise(r=>{e?.aborted?r():e?.addEventListener("abort",()=>r(),{once:!0})})}return Promise.resolve(i(o(),{}))};export{s as w};

@@ -11,10 +11,32 @@ func out(_ s: String) {
 func storybookRoot() -> URL {
     let candidates = [
         ProcessInfo.processInfo.environment["PROBE_SB"],
-        "/Users/runner/work/Signal-iOS/Signal-iOS/.github/duo-probe/sb",
+        "/Users/runner/work/Signal-iOS/Signal-iOS/.github/duo-probe",
     ].compactMap { $0 }
-    for c in candidates where FileManager.default.fileExists(atPath: c + "/iframe.html") { return URL(fileURLWithPath: c) }
+    for c in candidates where FileManager.default.fileExists(atPath: c + "/sb-base/iframe.html") { return URL(fileURLWithPath: c) }
     return URL(fileURLWithPath: candidates.last!)
+}
+
+// WKWebView shows the keyboard only for user-initiated focus; the probe focuses from script.
+func installFocusSwizzle() {
+    guard let cls = NSClassFromString("WKContentView") else { out("no WKContentView"); return }
+    var count: UInt32 = 0
+    if let list = class_copyMethodList(cls, &count) {
+        for i in 0..<Int(count) {
+            let name = NSStringFromSelector(method_getName(list[i]))
+            if name.contains("elementDidFocus") { out("method \(name) types=\(String(cString: method_getTypeEncoding(list[i])!))") }
+        }
+        free(list)
+    }
+    let sel = NSSelectorFromString("_elementDidFocus:userIsInteracting:blurPreviousNode:activityStateChanges:userObject:")
+    guard let m = class_getInstanceMethod(cls, sel) else { out("no focus selector"); return }
+    typealias Orig = @convention(c) (AnyObject, Selector, UnsafeRawPointer?, Bool, Bool, UInt, AnyObject?) -> Void
+    let orig = unsafeBitCast(method_getImplementation(m), to: Orig.self)
+    let block: @convention(block) (AnyObject, UnsafeRawPointer?, Bool, Bool, UInt, AnyObject?) -> Void = { me, info, _, blur, changes, obj in
+        orig(me, sel, info, true, blur, changes, obj)
+    }
+    method_setImplementation(m, imp_implementationWithBlock(block))
+    out("focus swizzle installed")
 }
 
 final class FileScheme: NSObject, WKURLSchemeHandler {
@@ -48,8 +70,10 @@ final class Probe: NSObject, WKScriptMessageHandler {
 final class WebVC: UIViewController, WKNavigationDelegate {
     var web: WKWebView!
     let urls = [
-        "probe://app/iframe.html?id=probe-duo--workspace&viewMode=story",
-        "probe://app/iframe.html?id=probe-duo--creation&viewMode=story",
+        "probe://app/sb-base/iframe.html?id=probe-duo--workspace&viewMode=story",
+        "probe://app/sb-fix/iframe.html?id=probe-duo--workspace&viewMode=story",
+        "probe://app/sb-base/iframe.html?id=probe-duo--creation&viewMode=story",
+        "probe://app/sb-fix/iframe.html?id=probe-duo--creation&viewMode=story",
     ]
     var idx = 0
     let scheme = FileScheme()
@@ -67,7 +91,8 @@ final class WebVC: UIViewController, WKNavigationDelegate {
         if #available(iOS 16.4, *) { web.isInspectable = true }
         web.navigationDelegate = self
         view.addSubview(web)
-        out("root=\(scheme.root.path) exists=\(FileManager.default.fileExists(atPath: scheme.root.path + "/iframe.html"))")
+        out("root=\(scheme.root.path) exists=\(FileManager.default.fileExists(atPath: scheme.root.path + "/sb-base/iframe.html"))")
+        installFocusSwizzle()
         loadNext()
         Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.loadNext() }
@@ -80,7 +105,7 @@ final class WebVC: UIViewController, WKNavigationDelegate {
         web.load(URLRequest(url: URL(string: u)!))
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        let resize = (idx % 4 == 3) || (idx % 4 == 0) // second pass of each story simulates a fold
+        let resize = false
         out("didFinish idx=\(idx) resize=\(resize)")
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             guard let self else { return }

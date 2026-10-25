@@ -1,0 +1,1 @@
+import{s as c}from"./orpc-qlMSh58E.js";function r(e,t){c(e,{firstSeen:t})}function i(e,t,n,o,a="pending",s){return{id:e,data:{filePath:t,lineRange:n,selectedCode:"// sample code",userNote:o},status:a,createdAt:s??Date.now(),statusChangedAt:a==="checked"?Date.now():void 0}}export{i as c,r as s};
