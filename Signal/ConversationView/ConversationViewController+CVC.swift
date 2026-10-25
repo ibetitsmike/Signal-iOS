@@ -252,6 +252,16 @@ extension ConversationViewController: CVLoadCoordinatorDelegate {
             updateViewToReflectLoad(loadedRenderState: self.renderState)
             loadDidLand()
         } else {
+            if viewState.isHoldingScrollActionForSizeTransition, renderState.conversationStyle == conversationStyle {
+                // The size transition already ended (e.g. iPhone Duo switched
+                // displays), so fade into the new layout instead of jumping.
+                UIView.transition(
+                    with: collectionView,
+                    duration: 0.25,
+                    options: [.transitionCrossDissolve, .allowUserInteraction],
+                    animations: nil,
+                )
+            }
             if !viewState.hasAppliedFirstLoad {
                 // Ignore scrollAction; we need to scroll to .initialPosition.
                 updateWithFirstLoad(update: update)
@@ -311,6 +321,7 @@ extension ConversationViewController: CVLoadCoordinatorDelegate {
             viewState.selectionAnimationState = .idle
             ensureBottomViewType()
         }
+        clearHeldScrollActionForSizeTransitionIfNeeded()
     }
 
     // The view's first appearance and the first load can race.

@@ -64,6 +64,9 @@ public struct CVScrollAction: Equatable, CustomStringConvertible {
 
     let action: Action
     let isAnimated: Bool
+    /// False for scrolls that only keep the reader's place, such as across a
+    /// size transition, so they don't highlight the message they scroll to.
+    var highlightsTarget = true
 
     public static var none: CVScrollAction {
         CVScrollAction(action: .none, isAnimated: false)
@@ -88,9 +91,7 @@ extension ConversationViewController {
             break
         case .scrollTo(let interactionId, let onScreenPercentage, let alignment):
             if let indexPath = self.indexPath(forInteractionUniqueId: interactionId) {
-                // Size transitions use this action to keep the reader's place,
-                // so only highlight for jumps the user asked for.
-                if viewState.scrollActionForSizeTransition == nil {
+                if scrollAction.highlightsTarget {
                     viewState.highlightedMessageId = interactionId
                 }
 
@@ -408,6 +409,13 @@ extension ConversationViewController {
     func setScrollActionForSizeTransition() {
         AssertIsOnMainThread()
 
+        // An earlier transition may still be holding the reader's place
+        // because its reload hasn't landed. That's still the place to keep.
+        if viewState.isHoldingScrollActionForSizeTransition {
+            viewState.isHoldingScrollActionForSizeTransition = false
+            return
+        }
+
         owsAssertDebug(viewState.scrollActionForSizeTransition == nil)
 
         viewState.scrollActionForSizeTransition = {
@@ -442,6 +450,7 @@ extension ConversationViewController {
                     alignment: .bottom,
                 ),
                 isAnimated: false,
+                highlightsTarget: false,
             )
         }()
     }
@@ -450,11 +459,29 @@ extension ConversationViewController {
         AssertIsOnMainThread()
 
         owsAssertDebug(viewState.scrollActionForSizeTransition != nil)
+
+        // The transition can finish before the reload for the new size lands.
+        // On iPhone Duo, for example, the safe area keeps changing for a moment
+        // after the window moves to the other display. Keep the reader's place
+        // until a load with the current style has landed.
+        guard renderState.conversationStyle == conversationStyle else {
+            viewState.isHoldingScrollActionForSizeTransition = true
+            return
+        }
+        viewState.isHoldingScrollActionForSizeTransition = false
+
         if let scrollAction = viewState.scrollActionForSizeTransition {
             owsAssertDebug(!scrollAction.isAnimated)
             perform(scrollAction: scrollAction)
         }
         viewState.scrollActionForSizeTransition = nil
+    }
+
+    func clearHeldScrollActionForSizeTransitionIfNeeded() {
+        guard viewState.isHoldingScrollActionForSizeTransition else {
+            return
+        }
+        clearScrollActionForSizeTransition()
     }
 
     func scrollDownButtonTapped() {
