@@ -1,0 +1,2 @@
+function c(s){const o=[],r=t=>{for(const e of Array.from(t))if(e instanceof CSSMediaRule&&e.conditionText.includes("pointer: coarse"))for(const i of Array.from(e.cssRules))o.push(i.cssText);else e instanceof CSSGroupingRule&&r(e.cssRules)};for(const t of Array.from(s.styleSheets))r(t.cssRules);if(o.length===0)throw new Error("No pointer: coarse rules found in the loaded CSS");const n=s.createElement("style");return n.textContent=o.join(`
+`),s.head.appendChild(n),()=>n.remove()}export{c as a};

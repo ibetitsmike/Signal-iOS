@@ -1,151 +1,105 @@
 import UIKit
+import WebKit
+import UniformTypeIdentifiers
 
-func sizeClass(_ s: UIUserInterfaceSizeClass) -> String {
-    switch s {
-    case .compact: return "C"
-    case .regular: return "R"
-    default: return "?"
-    }
-}
-
-func orient(_ o: UIInterfaceOrientation) -> String {
-    switch o {
-    case .portrait: return "portrait"
-    case .portraitUpsideDown: return "upsideDown"
-    case .landscapeLeft: return "landscapeLeft"
-    case .landscapeRight: return "landscapeRight"
-    default: return "unknown(\(o.rawValue))"
-    }
-}
-
-func deviceOrient(_ o: UIDeviceOrientation) -> String {
-    switch o {
-    case .portrait: return "portrait"
-    case .portraitUpsideDown: return "upsideDown"
-    case .landscapeLeft: return "landscapeLeft"
-    case .landscapeRight: return "landscapeRight"
-    case .faceUp: return "faceUp"
-    case .faceDown: return "faceDown"
-    default: return "unknown(\(o.rawValue))"
-    }
-}
-
-@MainActor
-func describe(_ window: UIWindow?, _ tag: String) -> String {
-    guard let window, let scene = window.windowScene else { return "PROBE \(tag) no window/scene" }
-    let screen = scene.screen
-    let st = screen.traitCollection
-    let wt = window.traitCollection
-    let main = UIScreen.main
-    var lines = [String]()
-    lines.append("PROBE \(tag) t=\(Date().timeIntervalSince1970)")
-    lines.append("PROBE   window.bounds=\(window.bounds.size) traits h=\(sizeClass(wt.horizontalSizeClass)) v=\(sizeClass(wt.verticalSizeClass)) idiom=\(wt.userInterfaceIdiom.rawValue) scale=\(wt.displayScale)")
-    lines.append("PROBE   scene.interfaceOrientation=\(orient(scene.interfaceOrientation)) coordSpace=\(scene.coordinateSpace.bounds.size)")
-    if #available(iOS 26.0, *) {
-        let g = scene.effectiveGeometry
-        lines.append("PROBE   effectiveGeometry.interfaceOrientation=\(orient(g.interfaceOrientation)) coordSpace=\(g.coordinateSpace.bounds.size) locked=\(g.isInterfaceOrientationLocked)")
-    }
-    lines.append("PROBE   scene.screen bounds=\(screen.bounds.size) native=\(screen.nativeBounds.size) scale=\(screen.scale) traits h=\(sizeClass(st.horizontalSizeClass)) v=\(sizeClass(st.verticalSizeClass)) idiom=\(st.userInterfaceIdiom.rawValue)")
-    lines.append("PROBE   UIScreen.main bounds=\(main.bounds.size) native=\(main.nativeBounds.size) sameAsScene=\(main === screen) screensCount=\(UIScreen.screens.count)")
-    lines.append("PROBE   device.orientation=\(deviceOrient(UIDevice.current.orientation)) idiom=\(UIDevice.current.userInterfaceIdiom.rawValue) model=\(UIDevice.current.model)")
-    lines.append("PROBE   safeArea=\(window.safeAreaInsets)")
-    return lines.joined(separator: "\n")
-}
-
-@MainActor
-func log(_ window: UIWindow?, _ tag: String) {
-    let text = describe(window, tag)
-    print(text)
+let start = Date()
+func out(_ s: String) {
+    print("WEBPROBE +\(String(format: "%.1f", Date().timeIntervalSince(start))) \(s)")
     fflush(stdout)
-    (window?.rootViewController as? ProbeViewController)?.label.text = text.replacingOccurrences(of: "PROBE ", with: "")
 }
 
-final class ProbeViewController: UIViewController {
-    let label = UILabel()
+func storybookRoot() -> URL {
+    let candidates = [
+        ProcessInfo.processInfo.environment["PROBE_SB"],
+        "/Users/runner/work/Signal-iOS/Signal-iOS/.github/duo-probe/sb",
+    ].compactMap { $0 }
+    for c in candidates where FileManager.default.fileExists(atPath: c + "/iframe.html") { return URL(fileURLWithPath: c) }
+    return URL(fileURLWithPath: candidates.last!)
+}
 
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
+final class FileScheme: NSObject, WKURLSchemeHandler {
+    let root = storybookRoot()
+    func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+        guard let url = task.request.url else { return }
+        var path = url.path
+        if path.isEmpty || path == "/" { path = "/index.html" }
+        let file = root.appendingPathComponent(String(path.dropFirst()))
+        guard let data = try? Data(contentsOf: file) else {
+            out("404 \(path)")
+            task.didReceive(HTTPURLResponse(url: url, statusCode: 404, httpVersion: "HTTP/1.1", headerFields: [:])!)
+            task.didFinish()
+            return
+        }
+        let mime = UTType(filenameExtension: file.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+        let fixed = file.pathExtension == "js" || file.pathExtension == "mjs" ? "text/javascript" : mime
+        task.didReceive(HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": fixed, "Content-Length": "\(data.count)", "Access-Control-Allow-Origin": "*"])!)
+        task.didReceive(data)
+        task.didFinish()
+    }
+    func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {}
+}
 
+final class Probe: NSObject, WKScriptMessageHandler {
+    func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
+        out("LOG \(message.body)")
+    }
+}
+
+final class WebVC: UIViewController {
+    var web: WKWebView!
+    let urls = [
+        "probe://app/iframe.html?id=probe-duo--workspace&viewMode=story",
+        "probe://app/iframe.html?id=probe-duo--creation&viewMode=story",
+    ]
+    var idx = 0
+    let scheme = FileScheme()
+    let probe = Probe()
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemYellow
-        label.numberOfLines = 0
-        label.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        label.textColor = .black
-        label.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
-            label.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-        ])
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        log(view.window, "viewDidAppear")
-    }
-
-    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
-        super.viewWillTransition(to: size, with: coordinator)
-        print("PROBE viewWillTransition to=\(size)")
-        log(view.window, "willTransition(before)")
-        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-            log(self?.view.window, "didTransition")
+        view.backgroundColor = .black
+        let cfg = WKWebViewConfiguration()
+        cfg.setURLSchemeHandler(scheme, forURLScheme: "probe")
+        cfg.userContentController.add(probe, name: "probe")
+        web = WKWebView(frame: view.bounds, configuration: cfg)
+        web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        if #available(iOS 16.4, *) { web.isInspectable = true }
+        view.addSubview(web)
+        out("root=\(scheme.root.path) exists=\(FileManager.default.fileExists(atPath: scheme.root.path + "/iframe.html"))")
+        loadNext()
+        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.loadNext() }
         }
     }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        log(view.window, "traitCollectionDidChange")
+    func loadNext() {
+        let u = urls[idx % urls.count]
+        idx += 1
+        out("load \(u) bounds=\(view.bounds.size) safe=\(view.safeAreaInsets) adjInset=\(web.scrollView.adjustedContentInset)")
+        web.load(URLRequest(url: URL(string: u)!))
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        out("viewDidAppear bounds=\(view.bounds.size) safe=\(view.safeAreaInsets)")
+    }
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        out("willTransition to=\(size)")
     }
 }
 
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
-
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = ProbeViewController()
+        window.rootViewController = WebVC()
         window.makeKeyAndVisible()
         self.window = window
-        log(window, "willConnect")
-        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { log(self?.window, "tick") }
-        }
-        if ProcessInfo.processInfo.environment["PROBE_KVC"] == "1" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                print("PROBE kvc: setting UIDevice orientation via KVC")
-                UIDevice.current.setValue(UIDeviceOrientation.portrait.rawValue, forKey: "orientation")
-                UIViewController.attemptRotationToDeviceOrientation()
-                print("PROBE kvc: survived")
-                fflush(stdout)
-            }
-        }
-    }
-
-    func windowScene(_ windowScene: UIWindowScene, didUpdate previousCoordinateSpace: UICoordinateSpace, interfaceOrientation previousInterfaceOrientation: UIInterfaceOrientation, traitCollection previousTraitCollection: UITraitCollection) {
-        log(window, "scene.didUpdate(prevOrientation=\(orient(previousInterfaceOrientation)))")
-    }
-
-    func sceneDidDisconnect(_ scene: UIScene) {
-        print("PROBE sceneDidDisconnect")
-        fflush(stdout)
     }
 }
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        print("PROBE didFinishLaunching")
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-        NotificationCenter.default.addObserver(forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main) { _ in
-            print("PROBE orientationDidChange device=\(deviceOrient(UIDevice.current.orientation))")
-            fflush(stdout)
-        }
-        return true
-    }
-
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool { true }
     func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
         configuration.delegateClass = SceneDelegate.self

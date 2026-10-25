@@ -1,0 +1,1 @@
+const e={compact:"[-t <tokens>] [-m <model>] [continue message]",model:"<abbreviation|full-id>",fork:"[start message]",new:"[start message]",idle:"<hours>|off",heartbeat:"<minutes>|off",goal:"[-b <amount>] [--turns <n>] <objective>|budget <amount>|clear",workflow:"<script_path> [json_args]"};export{e as S};
